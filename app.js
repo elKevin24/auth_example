@@ -21,48 +21,64 @@ app.use(session({
 
 
 app.use(flash());
+// Configura Passport
 app.use(passport.initialize());
 app.use(passport.session());
 
+// Configura estrategia de autenticación local
+passport.use(new LocalStrategy({
+    usernameField: 'correo_electronico',
+    passwordField: 'contrasena'
+  },
+  async (email, password, done) => {
+    try {
+      const connection = await pool.getConnection();
+      const [rows, fields] = await connection.execute('SELECT * FROM usuarios WHERE correo_electronico = ?', [email]);
+      connection.release();
 
+      if (rows.length === 0) {
+        return done(null, false, { message: 'Correo electrónico o contraseña incorrectos.' });
+      }
 
-// Ruta de inicio de sesión
-app.post('/login', async (req, res, next) => {
-    console.log(req.params)
-    console.log(req.body.correo_electronico)
-    console.log(req.body.contrasena)
+      const user = rows[0];
 
-    const email = req.body.correo_electronico;
-  const password = req.body.contrasena;
+      if (user.contrasena !== password) {
+        return done(null, false, { message: 'Correo electrónico o contraseña incorrectos.' });
+      }
 
+      return done(null, user);
+    } catch (error) {
+      return done(error);
+    }
+  }
+));
+
+// Serialize user para almacenar en sesión
+passport.serializeUser((user, done) => {
+  done(null, user.id);
+});
+
+// Deserialize user para recuperar desde sesión
+passport.deserializeUser(async (id, done) => {
   try {
     const connection = await pool.getConnection();
-    const [rows, fields] = await connection.execute('SELECT * FROM usuarios WHERE correo_electronico = ?', [email]);
+    const [rows, fields] = await connection.execute('SELECT * FROM usuarios WHERE id = ?', [id]);
     connection.release();
 
     if (rows.length === 0) {
-      // El usuario no existe en la base de datos
-      return res.status(401).json({ message: 'Correo electrónico o contraseña incorrectos.' });
+      return done(null, false);
     }
 
     const user = rows[0];
-    console.log(user)
-
-    if (user.contrasena !== password) {
-      // La contraseña no coincide
-      return res.status(401).json({ message: 'Correo electrónico o contraseña incorrectos.' });
-    }
-
-    // Autenticación exitosa
-    return res.status(200).json({ message: 'Autenticación exitosa.' });
-
+    return done(null, user);
   } catch (error) {
-    console.error('Error al autenticar usuario:', error);
-    return res.status(500).json({ message: 'Error al autenticar usuario.' });
+    return done(error);
   }
-
-  
-  });
+});
+  app.post('/login', passport.authenticate('local', {
+    successRedirect: '/dashboard',
+    failureRedirect: '/login',
+  }));
   
   app.get('/dashboard', (req, res) => {
     if (req.isAuthenticated()) {
